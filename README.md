@@ -6,6 +6,7 @@ OpenCode plugin for parallel subagent orchestration, token tracking, Graphify an
 
 ```bash
 npm install -g better-code-soul
+better-code-soul setup
 # Restart OpenCode
 /bcs-status
 ```

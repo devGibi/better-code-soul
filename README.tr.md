@@ -6,6 +6,7 @@ OpenCode icin paralel subagent orkestrasyon, token takibi, Graphify ve Context M
 
 ```bash
 npm install -g better-code-soul
+better-code-soul setup
 # OpenCode'u yeniden baslatin
 /bcs-status
 ```

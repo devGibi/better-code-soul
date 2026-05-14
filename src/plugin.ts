@@ -26,7 +26,7 @@ interface PluginDefinition {
   'experimental.session.compacting'?: (session: unknown) => Promise<void>
   'experimental.chat.system.transform'?: (system: string) => Promise<string>
   'chat.message'?: (message: unknown) => Promise<void>
-  tools?: Record<string, PluginTool>
+  tool?: Record<string, PluginTool>
 }
 
 export const BetterCodeSoulPlugin = async (_app?: unknown): Promise<PluginDefinition> => {
@@ -51,7 +51,7 @@ export const BetterCodeSoulPlugin = async (_app?: unknown): Promise<PluginDefini
       logger.debug('User message received')
     },
 
-    tools: {
+    tool: {
       bcs_status: {
         description: 'Better Code Soul general status summary — token, cost, active tools',
         parameters: {},
