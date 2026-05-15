@@ -54,14 +54,15 @@ export const BetterCodeSoulPlugin = async (_app?: unknown): Promise<PluginDefini
 
     tool: {
       bcs: {
-        description: 'Better Code Soul yonetim panelini ac (TAB: sekme, ESC: kapat)',
+        description: 'Better Code Soul web dashboard ac',
         parameters: {},
         execute: async () => {
           try {
-            const { Dashboard } = await import('./tui/Dashboard.js')
-            const dashboard = new Dashboard()
-            await dashboard.open()
-            return ''
+            const { startDashboardServer } = await import('./web/DashboardServer.js')
+            const dashboard = await startDashboardServer({ openBrowser: true, initializeServices: false })
+            const opened = dashboard.opened ? 'Browser acildi.' : 'Browser otomatik acilamadi.'
+            const status = dashboard.alreadyRunning ? 'Dashboard zaten calisiyor.' : 'Dashboard baslatildi.'
+            return `## Better Code Soul Dashboard\n\n${status} ${opened}\n\n${dashboard.url}`
           } catch (err) {
             logger.error('Dashboard error', err)
             return `Dashboard acilamadi: ${err}\n\nFallback: /bcs-status, /bcs-tokens, /bcs-models komutlarini kullan.`

@@ -15,7 +15,7 @@ better-code-soul setup
 
 | Komut | Aciklama |
 |-------|----------|
-| `/bcs` | Interaktif dashboard'u ac (TUI) |
+| `/bcs` | Lokal web dashboard'u ac |
 | `/bcs-status` | Genel durum ozeti — token, maliyet, aktif araclar |
 | `/bcs-tokens [donem]` | Token ve maliyet raporu (session, today, week, month) |
 | `/bcs-models` | Kullanilabilir modeller, auth durumu ve fiyat karsilastirmasi |
@@ -26,7 +26,8 @@ better-code-soul setup
 
 ## Dashboard
 
-`/bcs` komutu 5 sekmeden olusan interaktif bir terminal dashboard'u acar:
+`/bcs` komutu lokal bir dashboard server baslatir ve tarayicida acar.
+Terminal UI icin planlanan 5 panelli tasarim aynen korunur:
 
 1. **GENEL** — 7 gunluk token kullanim grafigi, context dolumu, arac durumu
 2. **MODELLER** — Model tablosu (tier, fiyat, baglanti durumu)
@@ -34,12 +35,18 @@ better-code-soul setup
 4. **ARACLAR** | Graphify ve Context Mode durumu ile toggle kontrolleri
 5. **OPTIMIZE** | Kullanim verilerine dayali optimizasyon onerileri
 
-Kisayollar:
+Dashboard kontrolleri:
 - `[1]-[5]` — Sekme degistir
-- `[G]` — Graphify toggle (Sekme 4)
-- `[C]` — Context Mode toggle (Sekme 4)
-- `[B]` — Graf build/guncelle (Sekme 4)
-- `[ESC]` veya `[Q]` — Dashboard'u kapat
+- `[G]` — Araclar sekmesinde Graphify toggle
+- `[C]` — Araclar sekmesinde Context Mode toggle
+- `[B]` — Araclar sekmesinde graf build/guncelle
+- OpenCode'da calisirken dashboard'u tarayici sekmesinde acik tutabilirsin
+
+Dogrudan baslatmak icin:
+
+```bash
+better-code-soul dashboard
+```
 
 ## Paralel Subagent Orkestrasyon Nasil Calisir?
 
@@ -113,6 +120,7 @@ Bu tum araclari Model Context Protocol (stdio transport) uzerinden sunar.
 ```bash
 better-code-soul setup     # Plugin ve komutlari OpenCode'a kaydet
 better-code-soul status    # Kurulum durumunu kontrol et
+better-code-soul dashboard # Lokal web dashboard'u baslat
 better-code-soul mcp       # MCP server baslat (stdio)
 better-code-soul help      # Yardim goster
 ```

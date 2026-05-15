@@ -10,8 +10,8 @@ const command = args[0]
 
 const BCS_COMMANDS: Record<string, { description: string; template: string }> = {
   'bcs': {
-    description: 'Better Code Soul yonetim panelini ac',
-    template: 'Call the bcs tool to open the dashboard.',
+    description: 'Better Code Soul web dashboard ac',
+    template: 'Call the bcs tool to open the web dashboard.',
   },
   'bcs-status': {
     description: 'Better Code Soul genel durum ozeti',
@@ -169,6 +169,15 @@ function status(): void {
   }
 }
 
+async function dashboard(): Promise<void> {
+  const { startDashboardServer } = await import('./web/DashboardServer.js')
+  const handle = await startDashboardServer({ openBrowser: true, initializeServices: true })
+  console.log('Better Code Soul dashboard')
+  console.log(`  URL: ${handle.url}`)
+  console.log(`  Browser: ${handle.opened ? 'opened' : 'open manually'}`)
+  console.log('\nPress Ctrl+C to stop the dashboard server.')
+}
+
 function help(): void {
   console.log(`
 Better Code Soul — OpenCode plugin for token tracking and parallel subagent orchestration
@@ -176,11 +185,12 @@ Better Code Soul — OpenCode plugin for token tracking and parallel subagent or
 Usage:
   better-code-soul setup     Register plugin with OpenCode
   better-code-soul status    Check installation status
+  better-code-soul dashboard Open web dashboard
   better-code-soul mcp       Start MCP server (stdio)
   better-code-soul help      Show this help
 
 OpenCode Commands (after setup):
-  /bcs                 Open dashboard (TUI)
+  /bcs                 Open web dashboard
   /bcs-status          General status summary
   /bcs-tokens [period] Token and cost report
   /bcs-models          Available models
@@ -197,6 +207,12 @@ switch (command) {
     break
   case 'status':
     status()
+    break
+  case 'dashboard':
+    dashboard().catch((err) => {
+      console.error(`Dashboard failed: ${err}`)
+      process.exit(1)
+    })
     break
   case 'mcp':
     import('./mcp/server.js')

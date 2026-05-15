@@ -15,7 +15,7 @@ better-code-soul setup
 
 | Command | Description |
 |---------|-------------|
-| `/bcs` | Open interactive dashboard (TUI) |
+| `/bcs` | Open local web dashboard |
 | `/bcs-status` | General status summary — tokens, cost, active tools |
 | `/bcs-tokens [period]` | Token and cost report (session, today, week, month) |
 | `/bcs-models` | Available models, auth status, and price comparison |
@@ -26,7 +26,8 @@ better-code-soul setup
 
 ## Dashboard
 
-The `/bcs` command opens an interactive terminal dashboard with 5 tabs:
+The `/bcs` command starts a local dashboard server and opens it in your browser.
+It keeps the same 5-panel design that was planned for the terminal UI:
 
 1. **GENEL** — 7-day token usage chart, context fill gauge, tool status
 2. **MODELLER** — Model table with tier, price, and connection status
@@ -34,12 +35,18 @@ The `/bcs` command opens an interactive terminal dashboard with 5 tabs:
 4. **ARACLAR** — Graphify and Context Mode status with toggle controls
 5. **OPTIMIZE** — Optimization suggestions based on usage data
 
-Keyboard shortcuts:
+Dashboard controls:
 - `[1]-[5]` — Switch tabs
-- `[G]` — Toggle Graphify (Tab 4)
-- `[C]` — Toggle Context Mode (Tab 4)
-- `[B]` — Build/Update Graphify graph (Tab 4)
-- `[ESC]` or `[Q]` — Close dashboard
+- `[G]` — Toggle Graphify on the Tools tab
+- `[C]` — Toggle Context Mode on the Tools tab
+- `[B]` — Build/Update Graphify graph on the Tools tab
+- Use the browser tab to keep the dashboard open while working in OpenCode
+
+You can also start it directly:
+
+```bash
+better-code-soul dashboard
+```
 
 ## How Parallel Subagent Orchestration Works
 
@@ -113,6 +120,7 @@ This exposes all tools via the Model Context Protocol (stdio transport).
 ```bash
 better-code-soul setup     # Register plugin and commands with OpenCode
 better-code-soul status    # Check installation status
+better-code-soul dashboard # Start local web dashboard
 better-code-soul mcp       # Start MCP server (stdio)
 better-code-soul help      # Show help
 ```
