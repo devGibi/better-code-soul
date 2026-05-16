@@ -6,6 +6,7 @@ import { modelRegistry } from '../services/ModelRegistry.js'
 import { authReader } from '../services/AuthReader.js'
 import { graphifyService } from '../services/GraphifyService.js'
 import { contextModeService } from '../services/ContextModeService.js'
+import { doctorService } from '../services/DoctorService.js'
 import { optimizationRules, getOptimizationStats } from '../tools/optimizationRules.js'
 import { formatBytes, formatCost, formatDuration, formatRelativeTime, formatTokens } from '../utils/format.js'
 import { logger } from '../utils/logger.js'
@@ -112,6 +113,12 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     return
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/doctor') {
+    const report = await doctorService.run(process.cwd())
+    sendJson(res, 200, { report, markdown: doctorService.formatMarkdown(report) })
+    return
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/optimize') {
     sendJson(res, 200, getOptimizeData())
     return
@@ -148,12 +155,14 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
 }
 
 async function getOverviewData() {
+  const errors: string[] = []
   const usage = db.getUsageHistory(7)
   const todayStats = db.getTodayStats()
-  const graphifyStats = graphifyService.getStats(process.cwd())
-  const ctxStats = await contextModeService.getStats()
+  const graphifyStats = safeSync(() => graphifyService.getStats(process.cwd()), { installed: false, nodeCount: 0, edgeCount: 0, fileCount: 0, sizeBytes: 0, lastBuilt: null }, 'Graphify stats', errors)
+  const ctxStats = await safeAsync(() => contextModeService.getStats(), { installed: false, active: false, savedThisSession: '$0.00', savedTotal: '$0.00', efficiencyPercent: 0 }, 'Context Mode stats', errors)
   const sessionStats = tokenTracker.getSessionStats()
   const providers = modelRegistry.getAuthProviders()
+  errors.push(...authReader.getLastErrors())
   const activeModelId = modelRegistry.getActiveModelId()
   const activeModel = activeModelId ? modelRegistry.getById(activeModelId) : modelRegistry.getBestFor('code')
   const contextFill = activeModel ? Math.min((todayStats.totalTokens / activeModel.contextWindow) * 100, 100) : 0
@@ -186,6 +195,7 @@ async function getOverviewData() {
       lastBuiltLabel: graphifyStats.lastBuilt ? formatRelativeTime(graphifyStats.lastBuilt) : null,
     },
     contextMode: ctxStats,
+    errors,
   }
 }
 
@@ -246,9 +256,16 @@ function getAgentsData() {
 }
 
 async function getToolsData() {
-  const graphify = await graphifyService.getFullStatus(process.cwd())
-  const contextModeStats = await contextModeService.getStats()
-  const contextModeInstalled = await contextModeService.isInstalled()
+  const errors: string[] = []
+  const graphify = await safeAsync(() => graphifyService.getFullStatus(process.cwd()), {
+    installed: false,
+    version: null,
+    active: false,
+    stats: { installed: false, nodeCount: 0, edgeCount: 0, fileCount: 0, sizeBytes: 0, lastBuilt: null },
+    needsRebuild: true,
+  }, 'Graphify status', errors)
+  const contextModeStats = await safeAsync(() => contextModeService.getStats(), { installed: false, active: false, savedThisSession: '$0.00', savedTotal: '$0.00', efficiencyPercent: 0 }, 'Context Mode stats', errors)
+  const contextModeInstalled = await safeAsync(() => contextModeService.isInstalled(), false, 'Context Mode install check', errors)
   const contextModeActive = contextModeService.isActive(process.cwd())
 
   return {
@@ -265,6 +282,25 @@ async function getToolsData() {
       active: contextModeActive,
       stats: contextModeStats,
     },
+    errors,
+  }
+}
+
+async function safeAsync<T>(fn: () => Promise<T>, fallback: T, label: string, errors: string[]): Promise<T> {
+  try {
+    return await fn()
+  } catch (err) {
+    errors.push(`${label}: ${String(err)}`)
+    return fallback
+  }
+}
+
+function safeSync<T>(fn: () => T, fallback: T, label: string, errors: string[]): T {
+  try {
+    return fn()
+  } catch (err) {
+    errors.push(`${label}: ${String(err)}`)
+    return fallback
   }
 }
 
@@ -382,6 +418,8 @@ function renderDashboardHtml(): string {
     button.action { border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; color: var(--text); background: var(--panel-strong); font-weight: 800; cursor: pointer; }
     button.action:hover { border-color: var(--cyan); color: var(--cyan); }
     pre { white-space: pre-wrap; max-height: 320px; overflow: auto; border: 1px solid var(--line); border-radius: 14px; background: #050b14; padding: 14px; color: #bdeaff; }
+    .error-card { grid-column: 1 / -1; border-color: rgba(248, 113, 113, .55); background: rgba(127, 29, 29, .28); }
+    .error-card h2 { color: var(--red); }
     footer { padding: 12px 20px; border-top: 1px solid var(--line); color: var(--muted); display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
     .empty { padding: 36px; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 18px; }
     @media (max-width: 900px) {
@@ -421,14 +459,16 @@ function renderDashboardHtml(): string {
     </div>
   </div>
   <script>
-    const state = { tab: 'overview', overview: null, models: null, agents: null, tools: null, optimize: null };
+    const state = { tab: 'overview', overview: null, models: null, agents: null, tools: null, optimize: null, errors: [] };
     const app = document.getElementById('app');
     const fmt = new Intl.NumberFormat('tr-TR');
 
     async function api(path, options) {
       const res = await fetch(path, options);
-      if (!res.ok) throw new Error(await res.text());
-      return res.json();
+      const text = await res.text();
+      const data = text ? JSON.parse(text) : null;
+      if (!res.ok) throw new Error(data?.error || text || res.statusText);
+      return data;
     }
 
     function esc(value) {
@@ -436,10 +476,22 @@ function renderDashboardHtml(): string {
     }
 
     async function loadAll() {
-      const [overview, models, agents, tools, optimize] = await Promise.all([
+      const names = ['overview', 'models', 'agents', 'tools', 'optimize'];
+      const settled = await Promise.allSettled([
         api('/api/overview'), api('/api/models'), api('/api/agents'), api('/api/tools'), api('/api/optimize')
       ]);
-      Object.assign(state, { overview, models, agents, tools, optimize });
+      const errors = [];
+      settled.forEach((result, index) => {
+        const name = names[index];
+        if (result.status === 'fulfilled') {
+          state[name] = result.value;
+          if (Array.isArray(result.value?.errors)) errors.push(...result.value.errors);
+        } else {
+          errors.push(name + ': ' + result.reason.message);
+        }
+      });
+      state.errors = [...new Set(errors)];
+      if (!state.overview) throw new Error(state.errors.join('\n') || 'overview verisi alinamadi');
       renderHeader();
       render();
     }
@@ -482,6 +534,7 @@ function renderDashboardHtml(): string {
       \`).join('') : '<div class="empty">Token gecmisi yok.</div>';
       app.innerHTML = \`
         <div class="grid">
+          \${renderErrors()}
           <section class="card"><h2>Token Kullanimi (7 gun)</h2><div class="bars">\${bars}</div></section>
           <section class="card"><h2>Context Dolumu</h2><div class="gauge" style="--value:\${overview.activeModel?.contextFill || 0}" data-label="\${overview.activeModel?.contextFill || 0}%"></div><p class="muted">\${esc(overview.activeModel?.contextWindowLabel || '0')} context window</p></section>
           <section class="card third"><h2>Graphify</h2>\${statusPill(overview.graphify.installed, overview.graphify.installed ? 'Graf hazir' : 'Kurulu degil')}<p>\${fmt.format(overview.graphify.nodeCount)} dugum / \${fmt.format(overview.graphify.edgeCount)} baglanti</p><p class="muted">\${esc(overview.graphify.sizeLabel)} \${overview.graphify.lastBuiltLabel ? ' / ' + esc(overview.graphify.lastBuiltLabel) : ''}</p></section>
@@ -499,27 +552,28 @@ function renderDashboardHtml(): string {
           <td>\${esc(model.priceLabel)}</td>
           <td><span class="badge \${esc(model.source.toLowerCase())}">\${esc(model.source)}</span></td>
         </tr>\`).join('');
-      app.innerHTML = \`<section class="card full"><h2>Modeller</h2><table><thead><tr><th>Model</th><th>Tier</th><th>Ctx</th><th>Fiyat (G/C)</th><th>Kaynak</th></tr></thead><tbody>\${rows}</tbody></table></section>\`;
+      app.innerHTML = \`<div class="grid">\${renderErrors()}<section class="card full"><h2>Modeller</h2><table><thead><tr><th>Model</th><th>Tier</th><th>Ctx</th><th>Fiyat (G/C)</th><th>Kaynak</th></tr></thead><tbody>\${rows}</tbody></table></section></div>\`;
     }
 
     function renderAgents() {
       const last = state.agents.last;
       if (!last) {
-        app.innerHTML = '<section class="card full"><h2>Son Orkestrasyon</h2><div class="empty">Henuz /bcs-agent kullanilmadi. Buyuk gorevler icin /bcs-agent "kullanici profil sayfasi ekle" yaz.</div></section>';
+        app.innerHTML = '<div class="grid">' + renderErrors() + '<section class="card full"><h2>Son Orkestrasyon</h2><div class="empty">Henuz /bcs-agent kullanilmadi. Buyuk gorevler icin /bcs-agent "kullanici profil sayfasi ekle" yaz.</div></section></div>';
         return;
       }
       const max = Math.max(...last.steps.map(step => step.duration_ms || 0), 1);
       const steps = last.steps.map(step => \`
-        <div class="step"><strong>\${esc(step.role)}</strong><div><div class="track"><span style="width:\${Math.max(8, Math.round((step.duration_ms || 0) / max * 100))}%"></span></div><span class="muted">\${esc(step.model)} / \${esc(step.tokenLabel)} tok / \${esc(step.costLabel)} / \${esc(step.durationLabel)}</span></div><span class="badge \${step.success ? 'review' : 'catalog'}">\${step.success ? 'OK' : 'FAIL'}</span></div>\`).join('');
-      app.innerHTML = \`<section class="card full"><h2>Son Orkestrasyon - \${esc(last.timestampLabel)}</h2><p><strong>Gorev:</strong> \${esc(last.userRequest)}</p><div class="steps">\${steps}</div><p><strong>Toplam:</strong> \${esc(last.totalTokensLabel)} tok / \${esc(last.totalCostLabel)} / \${esc(last.durationLabel)}</p></section>\`;
+        <div class="step"><strong>\${esc(step.role)}</strong><div><div class="track"><span style="width:\${Math.max(8, Math.round((step.duration_ms || 0) / max * 100))}%"></span></div><span class="muted">\${esc(step.model)} / \${esc(step.tokenLabel)} tok / \${esc(step.costLabel)} / \${esc(step.durationLabel)}\${step.error ? ' / ' + esc(step.error) : ''}</span></div><span class="badge \${step.success ? 'review' : 'catalog'}">\${step.success ? 'OK' : 'FAIL'}</span></div>\`).join('');
+      app.innerHTML = \`<div class="grid">\${renderErrors()}<section class="card full"><h2>Son Orkestrasyon - \${esc(last.timestampLabel)}</h2><p><strong>Gorev:</strong> \${esc(last.userRequest)}</p><div class="steps">\${steps}</div><p><strong>Toplam:</strong> \${esc(last.totalTokensLabel)} tok / \${esc(last.totalCostLabel)} / \${esc(last.durationLabel)}</p></section></div>\`;
     }
 
     function renderTools(log = '') {
       const tools = state.tools;
       app.innerHTML = \`
         <div class="grid">
+          \${renderErrors()}
           <section class="card"><h2>Graphify - Hafiza Sistemi</h2>\${statusPill(tools.graphify.installed, tools.graphify.installed ? 'Kurulu' : 'Kurulu degil')} \${statusPill(tools.graphify.active, tools.graphify.active ? 'OpenCode aktif' : 'OpenCode pasif', true)}<p>Graf: \${fmt.format(tools.graphify.stats.nodeCount)} dugum / \${fmt.format(tools.graphify.stats.edgeCount)} baglanti</p><p class="muted">Boyut: \${esc(tools.graphify.stats.sizeLabel)} / Son build: \${esc(tools.graphify.stats.lastBuiltLabel || 'yok')}</p><div class="actions"><button class="action" onclick="toggleGraphify()">[G] Toggle</button><button class="action" onclick="buildGraphify()">[B] Build/Guncelle</button></div></section>
-          <section class="card"><h2>Context Mode - Token Tasarrufu</h2>\${statusPill(tools.contextMode.installed, tools.contextMode.installed ? 'Kurulu' : 'Kurulu degil')} \${statusPill(tools.contextMode.active, tools.contextMode.active ? 'OpenCode aktif' : 'OpenCode pasif', true)}<p>Bu session: \${esc(tools.contextMode.stats.efficiencyPercent)}% tasarruf</p><p class="muted">Toplam: \${esc(tools.contextMode.stats.savedTotal)}</p><div class="actions"><button class="action" onclick="toggleContextMode()">[C] Toggle</button><button class="action" onclick="doctorContextMode()">[D] Doctor</button></div></section>
+          <section class="card"><h2>Context Mode - Token Tasarrufu</h2>\${statusPill(tools.contextMode.installed, tools.contextMode.installed ? 'Kurulu' : 'Kurulu degil')} \${statusPill(tools.contextMode.active, tools.contextMode.active ? 'OpenCode aktif' : 'OpenCode pasif', true)}<p>Bu session: \${esc(tools.contextMode.stats.efficiencyPercent)}% tasarruf</p><p class="muted">Toplam: \${esc(tools.contextMode.stats.savedTotal)}</p><div class="actions"><button class="action" onclick="toggleContextMode()">[C] Toggle</button><button class="action" onclick="doctorContextMode()">[D] Context Doctor</button><button class="action" onclick="doctorBcs()">BCS Doctor</button></div></section>
           <section class="card full"><h2>Islem Ciktisi</h2><pre>\${esc(log || 'Aksiyon ciktisi burada gorunecek.')}</pre></section>
         </div>\`;
     }
@@ -527,7 +581,11 @@ function renderDashboardHtml(): string {
     function renderOptimize() {
       const suggestions = state.optimize.suggestions;
       const body = suggestions.length ? suggestions.map(item => \`<section class="card full"><h2>\${esc(item.id)}</h2><p>\${esc(item.message)}</p></section>\`).join('') : '<section class="card full"><h2>Optimizasyon</h2><div class="empty">Her sey optimize gorunuyor.</div></section>';
-      app.innerHTML = \`<div class="grid">\${body}</div>\`;
+      app.innerHTML = \`<div class="grid">\${renderErrors()}\${body}</div>\`;
+    }
+
+    function renderErrors() {
+      return state.errors.length ? \`<section class="card error-card"><h2>Hata / Uyari</h2><pre>\${esc(state.errors.join('\n'))}</pre><p class="muted">Detayli kontrol icin /bcs-doctor veya Tools sekmesindeki BCS Doctor'u calistir.</p></section>\` : '';
     }
 
     function statusPill(on, label, warnWhenOff = false) {
@@ -543,6 +601,7 @@ function renderDashboardHtml(): string {
     async function buildGraphify() { renderTools('Graphify build calisiyor...'); const result = await api('/api/graphify/build', { method: 'POST' }); state.tools = result.tools; renderHeader(); renderTools(result.lines.join('\n')); }
     async function toggleContextMode() { state.tools = await api('/api/context-mode/toggle', { method: 'POST' }); renderHeader(); renderTools('Context Mode durumu degistirildi. OpenCode yeniden baslatma gerektirebilir.'); }
     async function doctorContextMode() { const result = await api('/api/context-mode/doctor', { method: 'POST' }); state.tools = result.tools; renderHeader(); renderTools(result.result); }
+    async function doctorBcs() { const result = await api('/api/doctor'); renderTools(result.markdown); }
 
     document.getElementById('tabs').addEventListener('click', event => {
       const button = event.target.closest('.tab');

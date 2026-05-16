@@ -1,4 +1,5 @@
 import { spawn as cpSpawn, type SpawnOptions } from 'node:child_process'
+import path from 'node:path'
 
 export interface SpawnResult {
   stdout: string
@@ -16,8 +17,10 @@ export function runCommand(
   options: SpawnOptions = {}
 ): Promise<SpawnResult> {
   return new Promise((resolve, reject) => {
-    const proc = cpSpawn(command, args, {
+    const resolved = resolveCommand(command)
+    const proc = cpSpawn(resolved.command, args, {
       ...options,
+      shell: options.shell ?? resolved.shell,
       stdio: ['pipe', 'pipe', 'pipe'],
     })
 
@@ -48,8 +51,10 @@ export async function* streamCommand(
   args: string[],
   options: SpawnOptions = {}
 ): AsyncGenerator<string> {
-  const proc = cpSpawn(command, args, {
+  const resolved = resolveCommand(command)
+  const proc = cpSpawn(resolved.command, args, {
     ...options,
+    shell: options.shell ?? resolved.shell,
     stdio: ['pipe', 'pipe', 'pipe'],
   })
 
@@ -85,4 +90,13 @@ export function commandExists(command: string): Promise<boolean> {
   return runCommand(checkCmd, [command])
     .then((r) => r.exitCode === 0)
     .catch(() => false)
+}
+
+const WINDOWS_CMD_SHIMS = new Set(['npm', 'npx', 'opencode', 'context-mode'])
+
+function resolveCommand(command: string): { command: string; shell: boolean } {
+  if (process.platform !== 'win32') return { command, shell: false }
+  if (!WINDOWS_CMD_SHIMS.has(command)) return { command, shell: false }
+  if (path.extname(command)) return { command, shell: true }
+  return { command: `${command}.cmd`, shell: true }
 }

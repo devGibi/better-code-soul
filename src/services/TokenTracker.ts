@@ -28,8 +28,10 @@ export class TokenTracker {
   }
 
   recordToolEnd(tool: string, tokens: TokenUsage, output: unknown): void {
-    const model = modelRegistry.getBestFor('code')
+    const fallbackModel = modelRegistry.getBestFor('code')
+    const model = tokens.model ? modelRegistry.getById(tokens.model) || fallbackModel : fallbackModel
     const cost = costCalculator.calculate(tokens, model)
+    const started = this.takeLatestStart(tool)
 
     db.saveToolCall({
       sessionId: this.sessionId,
@@ -37,12 +39,30 @@ export class TokenTracker {
       inputTokens: tokens.input,
       outputTokens: tokens.output,
       cost,
-      model: model.id,
+      model: tokens.model || model.id,
       timestamp: Date.now(),
-      durationMs: 0,
+      durationMs: started ? Date.now() - started.startTime : 0,
     })
 
-    logger.debug(`Tool ended: ${tool}`, { tokens, cost })
+    logger.debug(`Tool ended: ${tool}`, { tokens, cost, source: tokens.source, confidence: tokens.confidence })
+  }
+
+  private takeLatestStart(tool: string): ToolStartInfo | null {
+    let latestKey: string | null = null
+    let latest: ToolStartInfo | null = null
+
+    for (const [key, value] of this.activeTools.entries()) {
+      if (value.tool !== tool) continue
+      if (!latest || value.startTime > latest.startTime) {
+        latestKey = key
+        latest = value
+      }
+    }
+
+    if (latestKey) {
+      this.activeTools.delete(latestKey)
+    }
+    return latest
   }
 
   getSessionId(): string {
@@ -66,11 +86,14 @@ export class TokenTracker {
 }
 
 export function parseTokensFromOutput(output: unknown): TokenUsage {
+  const structured = parseStructuredTokenUsage(output)
+  if (structured) return structured
+
   const text = typeof output === 'string' ? output : JSON.stringify(output || '')
 
-  const tokenMatch = text.match(/tokens?:\s*(\d+)/i)
-  const inputMatch = text.match(/input.*?(\d+).*?token/i)
-  const outputMatch = text.match(/output.*?(\d+).*?token/i)
+  const tokenMatch = text.match(/tokens?:\s*([\d,]+)/i)
+  const inputMatch = text.match(/(?:input|prompt).*?([\d,]+).*?token/i)
+  const outputMatch = text.match(/(?:output|completion|candidate).*?([\d,]+).*?token/i)
   const costMatch = text.match(/cost:\s*\$?([\d.]+)/i)
   const modelMatch = text.match(/model:\s*([a-z0-9._-]+)/i)
 
@@ -78,15 +101,15 @@ export function parseTokensFromOutput(output: unknown): TokenUsage {
   let outputTokens = 0
 
   if (inputMatch) {
-    inputTokens = parseInt(inputMatch[1], 10)
+    inputTokens = toInt(inputMatch[1])
   } else if (tokenMatch) {
-    inputTokens = parseInt(tokenMatch[1], 10)
+    const total = toInt(tokenMatch[1])
+    inputTokens = Math.ceil(total * 0.3)
+    outputTokens = Math.max(total - inputTokens, 0)
   }
 
   if (outputMatch) {
-    outputTokens = parseInt(outputMatch[1], 10)
-  } else if (tokenMatch && !inputMatch) {
-    outputTokens = parseInt(tokenMatch[1], 10)
+    outputTokens = toInt(outputMatch[1])
   }
 
   if (inputTokens === 0 && outputTokens === 0) {
@@ -95,7 +118,125 @@ export function parseTokensFromOutput(output: unknown): TokenUsage {
     outputTokens = estimated.output
   }
 
-  return { input: inputTokens, output: outputTokens, model: modelMatch?.[1] }
+  return {
+    input: inputTokens,
+    output: outputTokens,
+    total: inputTokens + outputTokens,
+    model: modelMatch?.[1],
+    source: inputMatch || outputMatch || tokenMatch || costMatch ? 'regex' : 'estimate',
+    confidence: inputMatch || outputMatch ? 'medium' : 'low',
+  }
+}
+
+function parseStructuredTokenUsage(output: unknown): TokenUsage | null {
+  const value = normalizeStructuredOutput(output)
+  if (!value || typeof value !== 'object') return null
+  return findUsage(value, value)
+}
+
+function normalizeStructuredOutput(output: unknown): unknown {
+  if (typeof output !== 'string') return output
+
+  const text = output.trim()
+  if (!text.startsWith('{') && !text.startsWith('[')) return null
+
+  try {
+    return JSON.parse(text)
+  } catch {
+    return null
+  }
+}
+
+function findUsage(value: unknown, root: unknown, depth = 0): TokenUsage | null {
+  if (!value || typeof value !== 'object' || depth > 5) return null
+  const obj = value as Record<string, unknown>
+
+  if (obj.usageMetadata && typeof obj.usageMetadata === 'object') {
+    return parseUsageObject(obj.usageMetadata as Record<string, unknown>, root, 'provider', {
+      input: ['promptTokenCount'],
+      output: ['candidatesTokenCount'],
+      total: ['totalTokenCount'],
+      model: ['modelVersion'],
+    })
+  }
+
+  if (obj.usage && typeof obj.usage === 'object') {
+    return parseUsageObject(obj.usage as Record<string, unknown>, root, detectUsageSource(obj.usage as Record<string, unknown>))
+  }
+
+  const direct = parseUsageObject(obj, root, detectUsageSource(obj))
+  if (direct) return direct
+
+  for (const child of Object.values(obj)) {
+    const nested = findUsage(child, root, depth + 1)
+    if (nested) return nested
+  }
+
+  return null
+}
+
+function parseUsageObject(
+  usage: Record<string, unknown>,
+  root: unknown,
+  source: TokenUsage['source'] = 'provider',
+  aliases?: { input: string[]; output: string[]; total: string[]; model?: string[] }
+): TokenUsage | null {
+  const input = firstNumber(usage, aliases?.input || ['input_tokens', 'inputTokens', 'prompt_tokens', 'promptTokens', 'prompt', 'input'])
+  const output = firstNumber(usage, aliases?.output || ['output_tokens', 'outputTokens', 'completion_tokens', 'completionTokens', 'candidate_tokens', 'candidateTokens', 'completion', 'output'])
+  const total = firstNumber(usage, aliases?.total || ['total_tokens', 'totalTokens', 'totalTokenCount', 'tokens', 'total'])
+
+  if (input === null && output === null && total === null) return null
+
+  const normalizedInput = input ?? (total !== null && output !== null ? Math.max(total - output, 0) : 0)
+  const normalizedOutput = output ?? (total !== null ? Math.max(total - normalizedInput, 0) : 0)
+
+  return {
+    input: normalizedInput,
+    output: normalizedOutput,
+    total: total ?? normalizedInput + normalizedOutput,
+    model: findModel(root, aliases?.model),
+    source,
+    confidence: input !== null && output !== null ? 'high' : 'medium',
+  }
+}
+
+function detectUsageSource(usage: Record<string, unknown>): TokenUsage['source'] {
+  if ('input_tokens' in usage || 'output_tokens' in usage) return 'provider'
+  if ('prompt_tokens' in usage || 'completion_tokens' in usage) return 'provider'
+  if ('input_tokens' in usage || 'output_tokens' in usage || 'inputTokens' in usage || 'outputTokens' in usage) return 'opencode'
+  return 'provider'
+}
+
+function firstNumber(obj: Record<string, unknown>, keys: string[]): number | null {
+  for (const key of keys) {
+    const value = obj[key]
+    if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.round(value))
+    if (typeof value === 'string' && /^\d[\d,]*$/.test(value.trim())) return toInt(value)
+  }
+  return null
+}
+
+function findModel(root: unknown, preferredKeys: string[] = []): string | undefined {
+  const keys = [...preferredKeys, 'model', 'modelId', 'model_id', 'modelVersion']
+  const found = findStringKey(root, keys)
+  return found && /^[a-z0-9._:-]+$/i.test(found) ? found : undefined
+}
+
+function findStringKey(value: unknown, keys: string[], depth = 0): string | undefined {
+  if (!value || typeof value !== 'object' || depth > 4) return undefined
+  const obj = value as Record<string, unknown>
+  for (const key of keys) {
+    if (typeof obj[key] === 'string') return obj[key] as string
+  }
+  for (const child of Object.values(obj)) {
+    const found = findStringKey(child, keys, depth + 1)
+    if (found) return found
+  }
+  return undefined
+}
+
+function toInt(value: string): number {
+  return parseInt(value.replace(/,/g, ''), 10)
 }
 
 function estimateTokens(text: string): { input: number; output: number } {

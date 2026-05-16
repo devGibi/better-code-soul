@@ -54,8 +54,8 @@ describe('ResultMerger', () => {
   it('detects file conflicts', async () => {
     const planResult = makeResult({ agentId: 'planner_1' })
     const coderResults = [
-      makeResult({ agentId: 'coder_A', output: '// src/components/Button.tsx\nconst x = 1' }),
-      makeResult({ agentId: 'coder_B', output: '// src/components/Button.tsx\nconst y = 2' }),
+      makeResult({ agentId: 'coder_A', output: 'diff --git a/src/components/Button.tsx b/src/components/Button.tsx\n+++ b/src/components/Button.tsx\n@@ -10,3 +10,5 @@\n+const x = 1' }),
+      makeResult({ agentId: 'coder_B', output: 'diff --git a/src/components/Button.tsx b/src/components/Button.tsx\n+++ b/src/components/Button.tsx\n@@ -12,2 +12,4 @@\n+const y = 2' }),
     ]
     const reviewResults: AgentResult[] = []
 
@@ -63,5 +63,6 @@ describe('ResultMerger', () => {
 
     expect(merged.hasConflicts).toBe(true)
     expect(merged.output).toContain('Dosya Cakismalari')
+    expect(merged.output).toContain('overlapping diff hunks')
   })
 })

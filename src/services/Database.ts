@@ -379,6 +379,31 @@ export class BcsDatabase {
     return Number(result.lastInsertRowid)
   }
 
+  updateOrchestration(id: number, data: {
+    agentCount: number
+    totalTokens: number
+    totalCost: number
+    durationMs: number
+    modelsUsed: string[]
+    cancelled?: boolean
+    cancelReason?: string
+  }): void {
+    this.db.prepare(`
+      UPDATE orchestrations
+      SET agent_count = ?, total_tokens = ?, total_cost_usd = ?, duration_ms = ?, models_used = ?, cancelled = ?, cancel_reason = ?
+      WHERE id = ?
+    `).run(
+      data.agentCount,
+      data.totalTokens,
+      data.totalCost,
+      data.durationMs,
+      data.modelsUsed.join(','),
+      data.cancelled ? 1 : 0,
+      data.cancelReason || null,
+      id
+    )
+  }
+
   getOrchestrationCount(): number {
     const result = this.db.prepare('SELECT COUNT(*) as cnt FROM orchestrations').get() as { cnt: number }
     return result.cnt

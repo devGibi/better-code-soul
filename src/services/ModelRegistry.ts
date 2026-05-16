@@ -22,9 +22,12 @@ export interface AuthProvider {
   name: string
   connected: boolean
   method: 'oauth' | 'apikey' | 'unknown'
+  status?: 'connected' | 'configured' | 'error' | 'unknown'
+  source?: 'opencode-auth' | 'opencode-config' | 'environment' | 'catalog'
   email?: string
   plan?: string
   models?: string[]
+  error?: string
 }
 
 export class ModelRegistry {

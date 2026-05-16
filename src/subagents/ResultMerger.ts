@@ -1,6 +1,7 @@
 import type { AgentResult } from './AgentRunner.js'
 import { costCalculator } from '../services/CostCalculator.js'
 import { modelRegistry } from '../services/ModelRegistry.js'
+import { detectDiffConflicts, type FileConflict } from './DiffConflictDetector.js'
 
 export interface MergeInput {
   planResult: AgentResult
@@ -19,14 +20,11 @@ export interface MergedResult {
   agentCount: number
 }
 
-export interface FileConflict {
-  file: string
-  agents: string[]
-}
-
 export class ResultMerger {
   async merge(results: MergeInput): Promise<MergedResult> {
     const output: string[] = []
+    output.push(this.formatTimeline(results))
+    output.push('---')
 
     output.push('## Mimari Plan\n' + results.planResult.output)
     output.push('---')
@@ -50,7 +48,10 @@ export class ResultMerger {
     if (fileConflicts.length > 0) {
       output.push(
         '## Dosya Cakismalari\n' +
-          fileConflicts.map((f) => `${f.file}: ${f.agents.join(', ')} ayni dosyaya yazdi -> manuel birlestir`).join('\n')
+          fileConflicts.map((f) => {
+            const ranges = f.ranges.map((range) => range.start === null ? 'dosya geneli' : `${range.start}-${range.end}`).join(', ')
+            return `${f.file}: ${f.agents.join(', ')} (${f.reason}; ${ranges}) -> diffleri manuel birlestir`
+          }).join('\n')
       )
     }
 
@@ -76,20 +77,20 @@ export class ResultMerger {
   }
 
   private detectFileConflicts(coderResults: AgentResult[]): FileConflict[] {
-    const fileMap = new Map<string, string[]>()
+    return detectDiffConflicts(coderResults)
+  }
 
-    for (const result of coderResults) {
-      const fileMatches = result.output.match(/\/\/\s*(src\/[^\s`]+|migrations\/[^\s`]+)/g) || []
-      for (const match of fileMatches) {
-        const file = match.replace('//', '').trim()
-        if (!fileMap.has(file)) fileMap.set(file, [])
-        fileMap.get(file)!.push(result.agentId)
-      }
+  private formatTimeline(results: MergeInput): string {
+    const rows = [results.planResult, ...results.coderResults, ...results.reviewResults]
+    const lines = ['## Agent Timeline', '', '| Agent | Model | Tokens | Sure | Durum |', '|---|---|---:|---:|---|']
+    for (const row of rows) {
+      lines.push(`| ${row.agentId} | ${row.model || '-'} | ${(row.inputTokens + row.outputTokens).toLocaleString()} | ${Math.round(row.durationMs / 1000)}s | ${row.success ? 'OK' : `FAIL: ${this.compact(row.error || 'unknown')}`} |`)
     }
+    return lines.join('\n')
+  }
 
-    return [...fileMap.entries()]
-      .filter(([, agents]) => agents.length > 1)
-      .map(([file, agents]) => ({ file, agents }))
+  private compact(value: string): string {
+    return value.replace(/\s+/g, ' ').slice(0, 120)
   }
 
   private calculateTotalCost(results: MergeInput): number {

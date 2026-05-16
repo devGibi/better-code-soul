@@ -8,7 +8,7 @@ OpenCode plugin for parallel subagent orchestration, token tracking, Graphify an
 npm install -g better-code-soul
 better-code-soul setup
 # Restart OpenCode
-/bcs-status
+/bcs-doctor
 ```
 
 ## Commands
@@ -23,6 +23,7 @@ better-code-soul setup
 | `/bcs-graphify` | Graphify memory system management |
 | `/bcs-context-mode` | Context Mode token savings management |
 | `/bcs-optimize` | Token optimization suggestions |
+| `/bcs-doctor` | Install, auth, storage, and tool diagnostics |
 
 ## Dashboard
 
@@ -120,6 +121,7 @@ This exposes all tools via the Model Context Protocol (stdio transport).
 ```bash
 better-code-soul setup     # Register plugin and commands with OpenCode
 better-code-soul status    # Check installation status
+better-code-soul doctor    # Run install/auth/tool diagnostics
 better-code-soul dashboard # Start local web dashboard
 better-code-soul mcp       # Start MCP server (stdio)
 better-code-soul help      # Show help

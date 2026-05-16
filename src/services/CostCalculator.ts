@@ -4,6 +4,9 @@ export interface TokenUsage {
   input: number
   output: number
   model?: string
+  total?: number
+  source?: 'provider' | 'opencode' | 'regex' | 'estimate' | 'none'
+  confidence?: 'high' | 'medium' | 'low'
 }
 
 export class CostCalculator {

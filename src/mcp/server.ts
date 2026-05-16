@@ -5,6 +5,7 @@ import { modelRegistry } from '../services/ModelRegistry.js'
 import { authReader } from '../services/AuthReader.js'
 import { graphifyService } from '../services/GraphifyService.js'
 import { contextModeService } from '../services/ContextModeService.js'
+import { doctorService } from '../services/DoctorService.js'
 import { Orchestrator } from '../subagents/Orchestrator.js'
 import { formatTokens, formatCost } from '../utils/format.js'
 import { logger } from '../utils/logger.js'
@@ -112,6 +113,14 @@ const TOOLS: Record<string, { description: string; inputSchema: unknown; handler
         default:
           return `Unknown action: ${action}`
       }
+    },
+  },
+  bcs_doctor: {
+    description: 'Install, auth, storage, and tool diagnostics',
+    inputSchema: { type: 'object', properties: {} },
+    handler: async () => {
+      const report = await doctorService.run(process.cwd())
+      return doctorService.formatMarkdown(report)
     },
   },
   bcs_agent: {

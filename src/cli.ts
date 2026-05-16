@@ -37,6 +37,10 @@ const BCS_COMMANDS: Record<string, { description: string; template: string }> = 
     description: 'Better Code Soul optimizasyon onerileri',
     template: 'Call the bcs_optimize tool and return only its output.',
   },
+  'bcs-doctor': {
+    description: 'Better Code Soul kurulum ve saglik kontrolu',
+    template: 'Call the bcs_doctor tool and return only its output.',
+  },
   'bcs-agent': {
     description: 'Gorevi paralel subagentlara dagit',
     template: 'Call the bcs_agent tool with request set to "$ARGUMENTS". Return only its output.',
@@ -141,7 +145,7 @@ function setup(): void {
 
   console.log(`  Data directory: ${hubData}`)
   console.log(`  Config: ${configPath}`)
-  console.log('\nSetup complete. Quit and restart OpenCode, then run: /bcs-status')
+  console.log('\nSetup complete. Quit and restart OpenCode, then run: /bcs-doctor')
 }
 
 function status(): void {
@@ -178,6 +182,27 @@ async function dashboard(): Promise<void> {
   console.log('\nPress Ctrl+C to stop the dashboard server.')
 }
 
+async function doctor(): Promise<void> {
+  const { db } = await import('./services/Database.js')
+  const { modelRegistry } = await import('./services/ModelRegistry.js')
+  const { tokenTracker } = await import('./services/TokenTracker.js')
+  const { authReader } = await import('./services/AuthReader.js')
+  const { doctorService } = await import('./services/DoctorService.js')
+
+  await db.init()
+  modelRegistry.init()
+  tokenTracker.init()
+  modelRegistry.setAuthProviders(await authReader.getProviders(true))
+
+  const report = await doctorService.run(process.cwd())
+  if (args.includes('--json')) {
+    console.log(JSON.stringify(report, null, 2))
+  } else {
+    console.log(doctorService.formatMarkdown(report))
+  }
+  db.close()
+}
+
 function help(): void {
   console.log(`
 Better Code Soul — OpenCode plugin for token tracking and parallel subagent orchestration
@@ -185,6 +210,7 @@ Better Code Soul — OpenCode plugin for token tracking and parallel subagent or
 Usage:
   better-code-soul setup     Register plugin with OpenCode
   better-code-soul status    Check installation status
+  better-code-soul doctor    Run install/auth/tool diagnostics
   better-code-soul dashboard Open web dashboard
   better-code-soul mcp       Start MCP server (stdio)
   better-code-soul help      Show this help
@@ -198,6 +224,7 @@ OpenCode Commands (after setup):
   /bcs-graphify        Graphify memory system
   /bcs-context-mode    Context Mode management
   /bcs-optimize        Optimization suggestions
+  /bcs-doctor          Install/auth/tool diagnostics
 `)
 }
 
@@ -207,6 +234,12 @@ switch (command) {
     break
   case 'status':
     status()
+    break
+  case 'doctor':
+    doctor().catch((err) => {
+      console.error(`Doctor failed: ${err}`)
+      process.exit(1)
+    })
     break
   case 'dashboard':
     dashboard().catch((err) => {

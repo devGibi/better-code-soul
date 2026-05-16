@@ -46,10 +46,18 @@ export class AgentRunner {
     const agentId = `${config.agentType}_${Date.now()}`
 
     try {
-      if (this.supportsNativeSubagent()) {
-        return await this.runNative(config, startTime, agentId)
-      }
-      return await this.runViaCLI(config, startTime, agentId)
+      logger.info(`Agent started: ${agentId}`, { model: config.model.id, type: config.agentType })
+      const result = this.supportsNativeSubagent()
+        ? await this.runNative(config, startTime, agentId)
+        : await this.runViaCLI(config, startTime, agentId)
+      logger.info(`Agent finished: ${agentId}`, {
+        success: result.success,
+        model: result.model,
+        tokens: result.inputTokens + result.outputTokens,
+        durationMs: result.durationMs,
+        error: result.error,
+      })
+      return result
     } catch (err) {
       logger.error(`Agent ${agentId} failed`, err)
       return {
@@ -118,7 +126,7 @@ export class AgentRunner {
           model: config.model.id,
           durationMs: Date.now() - startTime,
           success: false,
-          error: result.stderr,
+          error: compactError(result.stderr || result.stdout || `opencode exited with ${result.exitCode}`),
         }
       }
 
@@ -152,9 +160,15 @@ export class AgentRunner {
       '',
       `GÖREV:\n${config.task}`,
       '',
+      config.agentType === 'coder' ? 'CIKTI FORMATI: Degistirilecek dosyalari unified diff olarak ver. Her diff hunk dosya yolunu ve @@ satir araligini icermeli.' : '',
+      '',
       'KESİNLİKLE UYULMASI GEREKEN: İlk seferde çalışan çıktı üret. Emin değilsen eksik bırak, tahmin yürütme.',
     ]
 
     return parts.filter(Boolean).join('\n')
   }
+}
+
+function compactError(value: string): string {
+  return value.replace(/\s+/g, ' ').trim().slice(0, 1000)
 }

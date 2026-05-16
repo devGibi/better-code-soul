@@ -6,6 +6,7 @@ import { graphifyService } from './services/GraphifyService.js'
 import { contextModeService } from './services/ContextModeService.js'
 import { costCalculator } from './services/CostCalculator.js'
 import { configPatcher } from './services/ConfigPatcher.js'
+import { doctorService } from './services/DoctorService.js'
 import { Orchestrator } from './subagents/Orchestrator.js'
 import { onToolBefore } from './hooks/toolBefore.js'
 import { onToolAfter } from './hooks/toolAfter.js'
@@ -358,6 +359,15 @@ export const BetterCodeSoulPlugin = async (_app?: unknown): Promise<PluginDefini
         },
       },
 
+      bcs_doctor: {
+        description: 'Better Code Soul install/auth/tool diagnostics',
+        parameters: {},
+        execute: async () => {
+          const report = await doctorService.run(process.cwd())
+          return doctorService.formatMarkdown(report)
+        },
+      },
+
       bcs_agent: {
         description: 'Gorevi paralel subagentlara dagit. Buyuk feature veya refactor icin kullan.',
         parameters: {
@@ -376,7 +386,7 @@ export const BetterCodeSoulPlugin = async (_app?: unknown): Promise<PluginDefini
           },
         },
         execute: async ({ request, strategy = 'auto', maxCost }) => {
-          const orchestrator = new Orchestrator()
+          const orchestrator = new Orchestrator(_app)
 
           const decision = await orchestrator.decompose(request, process.cwd())
           const decisionMd = orchestrator['taskDecomposer'].formatDecision(decision)

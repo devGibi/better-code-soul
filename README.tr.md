@@ -8,7 +8,7 @@ OpenCode icin paralel subagent orkestrasyon, token takibi, Graphify ve Context M
 npm install -g better-code-soul
 better-code-soul setup
 # OpenCode'u yeniden baslatin
-/bcs-status
+/bcs-doctor
 ```
 
 ## Komutlar
@@ -23,6 +23,7 @@ better-code-soul setup
 | `/bcs-graphify` | Graphify hafiza sistemi yonetimi |
 | `/bcs-context-mode` | Context Mode token tasarrufu yonetimi |
 | `/bcs-optimize` | Token optimizasyon onerileri |
+| `/bcs-doctor` | Kurulum, auth, depolama ve arac saglik kontrolu |
 
 ## Dashboard
 
@@ -120,6 +121,7 @@ Bu tum araclari Model Context Protocol (stdio transport) uzerinden sunar.
 ```bash
 better-code-soul setup     # Plugin ve komutlari OpenCode'a kaydet
 better-code-soul status    # Kurulum durumunu kontrol et
+better-code-soul doctor    # Kurulum/auth/arac saglik kontrolu
 better-code-soul dashboard # Lokal web dashboard'u baslat
 better-code-soul mcp       # MCP server baslat (stdio)
 better-code-soul help      # Yardim goster

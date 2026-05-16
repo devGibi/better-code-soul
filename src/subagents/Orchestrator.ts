@@ -148,6 +148,15 @@ export class Orchestrator {
       allResults.push(planResult)
 
       if (!planResult.success) {
+        db.updateOrchestration(orchId, {
+          agentCount: allResults.length,
+          totalTokens: allResults.reduce((sum, r) => sum + r.inputTokens + r.outputTokens, 0),
+          totalCost: 0,
+          durationMs: Date.now() - startTime,
+          modelsUsed: allResults.map((r) => r.model).filter(Boolean),
+          cancelled: true,
+          cancelReason: `Planning failed: ${planResult.error}`,
+        })
         return {
           cancelled: true,
           reason: `Planning failed: ${planResult.error}`,
@@ -198,10 +207,11 @@ export class Orchestrator {
       })
 
       const settled = await Promise.allSettled(coderPromises)
-      coderResults = settled
-        .filter((r): r is PromiseFulfilledResult<AgentResult> => r.status === 'fulfilled' && r.value.success)
+      const allCoderResults = settled
+        .filter((r): r is PromiseFulfilledResult<AgentResult> => r.status === 'fulfilled')
         .map((r) => r.value)
-      allResults.push(...coderResults)
+      coderResults = allCoderResults.filter((r) => r.success)
+      allResults.push(...allCoderResults)
     }
 
     let reviewResults: AgentResult[] = []
@@ -234,10 +244,11 @@ export class Orchestrator {
       })
 
       const settled = await Promise.allSettled(reviewPromises)
-      reviewResults = settled
-        .filter((r): r is PromiseFulfilledResult<AgentResult> => r.status === 'fulfilled' && r.value.success)
+      const allReviewResults = settled
+        .filter((r): r is PromiseFulfilledResult<AgentResult> => r.status === 'fulfilled')
         .map((r) => r.value)
-      allResults.push(...reviewResults)
+      reviewResults = allReviewResults.filter((r) => r.success)
+      allResults.push(...allReviewResults)
     }
 
     const merged = await this.resultMerger.merge({
@@ -245,18 +256,18 @@ export class Orchestrator {
       coderResults,
       reviewResults,
     })
+    const durationMs = Date.now() - startTime
 
-    db.saveOrchestration({
-      userRequest,
+    db.updateOrchestration(orchId, {
       agentCount: merged.agentCount,
       totalTokens: merged.totalTokens,
       totalCost: merged.totalCost,
-      durationMs: merged.durationMs,
+      durationMs,
       modelsUsed: merged.modelsUsed,
       cancelled: false,
     })
 
-    return { ...merged, durationMs: Date.now() - startTime, decision }
+    return { ...merged, durationMs, decision }
   }
 
   private buildContextSummary(decision: DecomposeDecision, projectPath: string): string {

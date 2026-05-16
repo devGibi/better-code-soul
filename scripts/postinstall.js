@@ -41,6 +41,10 @@ const BCS_COMMANDS = {
     description: 'Better Code Soul optimizasyon onerileri',
     template: 'Call the bcs_optimize tool and return only its output.',
   },
+  'bcs-doctor': {
+    description: 'Better Code Soul kurulum ve saglik kontrolu',
+    template: 'Call the bcs_doctor tool and return only its output.',
+  },
   'bcs-agent': {
     description: 'Gorevi paralel subagentlara dagit',
     template: 'Call the bcs_agent tool with request set to "$ARGUMENTS". Return only its output.',
@@ -106,7 +110,7 @@ try {
   }
 
   console.log('\x1b[32m%s\x1b[0m', '✅ Better Code Soul installed successfully.')
-  console.log('   Quit and restart OpenCode, then run: /bcs-status')
+  console.log('   Quit and restart OpenCode, then run: /bcs-doctor')
 } catch (err) {
   console.warn('\x1b[33m%s\x1b[0m', '⚠ Better Code Soul postinstall: could not auto-register plugin.')
   console.warn('   Manual setup: run `better-code-soul setup` or add the plugin and command entries to opencode.json.')
