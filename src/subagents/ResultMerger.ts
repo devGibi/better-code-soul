@@ -1,7 +1,8 @@
 import type { AgentResult } from './AgentRunner.js'
 import { costCalculator } from '../services/CostCalculator.js'
 import { modelRegistry } from '../services/ModelRegistry.js'
-import { detectDiffConflicts, type FileConflict } from './DiffConflictDetector.js'
+import { diffSummaryService, type DiffSummary } from '../services/DiffSummaryService.js'
+import type { FileConflict } from './DiffConflictDetector.js'
 
 export interface MergeInput {
   planResult: AgentResult
@@ -18,6 +19,7 @@ export interface MergedResult {
   hasConflicts: boolean
   issues: string[]
   agentCount: number
+  diffSummary?: DiffSummary
 }
 
 export class ResultMerger {
@@ -44,7 +46,10 @@ export class ResultMerger {
       output.push('## Tum Parcalar Onaylandi')
     }
 
-    const fileConflicts = this.detectFileConflicts(results.coderResults)
+    const diffSummary = diffSummaryService.summarizeAgentDiffs(results.coderResults)
+    const fileConflicts = diffSummary.conflicts
+    output.push('## Diff Ozeti\n' + diffSummaryService.format(diffSummary))
+
     if (fileConflicts.length > 0) {
       output.push(
         '## Dosya Cakismalari\n' +
@@ -73,11 +78,12 @@ export class ResultMerger {
       hasConflicts: fileConflicts.length > 0,
       issues,
       agentCount: allResults.length,
+      diffSummary,
     }
   }
 
   private detectFileConflicts(coderResults: AgentResult[]): FileConflict[] {
-    return detectDiffConflicts(coderResults)
+    return diffSummaryService.summarizeAgentDiffs(coderResults).conflicts
   }
 
   private formatTimeline(results: MergeInput): string {

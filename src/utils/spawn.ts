@@ -92,7 +92,7 @@ export function commandExists(command: string): Promise<boolean> {
     .catch(() => false)
 }
 
-const WINDOWS_CMD_SHIMS = new Set(['npm', 'npx', 'opencode', 'context-mode'])
+const WINDOWS_CMD_SHIMS = new Set(['npm', 'npx', 'pnpm', 'yarn', 'bun', 'opencode', 'context-mode'])
 
 function resolveCommand(command: string): { command: string; shell: boolean } {
   if (process.platform !== 'win32') return { command, shell: false }

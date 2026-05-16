@@ -6,6 +6,7 @@ import { authReader } from './AuthReader.js'
 import { graphifyService } from './GraphifyService.js'
 import { contextModeService } from './ContextModeService.js'
 import { db } from './Database.js'
+import { projectCommandDetector } from './ProjectCommandDetector.js'
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail'
 
@@ -39,6 +40,7 @@ const COMMAND_NAMES = [
   'bcs-optimize',
   'bcs-agent',
   'bcs-doctor',
+  'bcs-quality',
 ]
 
 export class DoctorService {
@@ -47,6 +49,7 @@ export class DoctorService {
 
     checks.push(this.checkNode())
     checks.push(this.checkPackageBuild(projectPath))
+    checks.push(this.checkProjectCommands(projectPath))
     checks.push(await this.checkOpencodeCommand())
     checks.push(this.checkDataDirectory())
     checks.push(this.checkGlobalConfig())
@@ -113,7 +116,26 @@ export class DoctorService {
       area: 'Package',
       status: 'warn',
       message: `Missing build artifacts: ${missing.join(', ')}`,
-      remedy: 'Run `npm run build` before publishing or local CLI use.',
+      remedy: `Run \`${projectCommandDetector.detect(projectPath).primary?.commands.build?.display || 'npm run build'}\` before publishing or local CLI use.`,
+    }
+  }
+
+  private checkProjectCommands(projectPath: string): DoctorCheck {
+    const commands = projectCommandDetector.getQualityCommands(projectPath)
+    if (commands.length === 0) {
+      return {
+        area: 'Quality Commands',
+        status: 'warn',
+        message: 'No test/lint/build commands detected',
+        remedy: 'Add package scripts such as `test:run`, `lint`, and `build` so Quality Loop can prove success.',
+      }
+    }
+
+    return {
+      area: 'Quality Commands',
+      status: commands.length >= 2 ? 'pass' : 'warn',
+      message: commands.map((command) => command.display).join(', '),
+      remedy: commands.length >= 2 ? undefined : 'Add missing test/lint/build scripts for stronger Quality Loop scoring.',
     }
   }
 

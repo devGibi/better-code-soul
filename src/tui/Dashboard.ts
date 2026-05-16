@@ -7,7 +7,7 @@ import { graphifyService } from '../services/GraphifyService.js'
 import { contextModeService } from '../services/ContextModeService.js'
 import { ModelRouter, ROUTING_TABLE_EXPORT } from '../services/ModelRouter.js'
 import { optimizationRules, getOptimizationStats } from '../tools/optimizationRules.js'
-import { formatTokens, formatCost, formatRelativeTime, formatBytes } from '../utils/format.js'
+import { formatTokens, formatCost, formatDuration, formatRelativeTime, formatBytes } from '../utils/format.js'
 import { logger } from '../utils/logger.js'
 
 export class Dashboard {
@@ -58,6 +58,7 @@ export class Dashboard {
     this.screen.key(['3'], () => this.switchTab(3))
     this.screen.key(['4'], () => this.switchTab(4))
     this.screen.key(['5'], () => this.switchTab(5))
+    this.screen.key(['6'], () => this.switchTab(6))
 
     this.screen.key(['g', 'G'], async () => {
       if (this.currentTab !== 4) return
@@ -89,6 +90,7 @@ export class Dashboard {
       case 3: await this.renderAgentsTab(); break
       case 4: await this.renderToolsTab(); break
       case 5: await this.renderOptimizeTab(); break
+      case 6: await this.renderQualityTab(); break
     }
 
     this.screen.render()
@@ -316,6 +318,65 @@ export class Dashboard {
     })
   }
 
+  private async renderQualityTab(): Promise<void> {
+    const summary = db.getQualitySummary(30)
+    const models = db.getModelPerformanceHistory(30).slice(0, 12)
+    const recent = db.getRecentQualityRuns(6)
+
+    const summaryContent = [
+      `  Success score: ${summary.avgSuccessScore.toFixed(1)}/100`,
+      `  Success rate: ${(summary.successRate * 100).toFixed(0)}% (${summary.successfulRuns}/${summary.totalRuns})`,
+      `  Cost / successful task: ${formatCost(summary.avgCostPerSuccessfulTask)}`,
+      `  Retry rate: ${(summary.retryRate * 100).toFixed(0)}%`,
+      `  Conflict rate: ${(summary.conflictRate * 100).toFixed(0)}%`,
+    ].join('\n')
+
+    this.grid.set(3, 0, 3, 6, blessed.box, {
+      label: ' Quality Summary ',
+      border: { type: 'line' },
+      content: summaryContent,
+      tags: true,
+      style: { border: { fg: 'green' } },
+    })
+
+    const recentContent = recent.length === 0
+      ? '\n  Henuz quality run yok. /bcs-agent calistir.'
+      : recent.map((run) => `  #${run.orchestration_id} ${Number(run.success_score || 0).toFixed(0)}/100 ${run.passed ? 'PASS' : 'FAIL'} · ${formatCost(run.cost_per_successful_task || 0)}/success · retry ${run.retry_count || 0}`).join('\n')
+
+    this.grid.set(3, 6, 3, 6, blessed.box, {
+      label: ' Recent Runs ',
+      border: { type: 'line' },
+      content: recentContent,
+      tags: true,
+      style: { border: { fg: 'yellow' } },
+    })
+
+    const table = this.grid.set(6, 0, 5, 12, contrib.table, {
+      label: ' Model Performance ',
+      keys: true,
+      fg: 'white',
+      selectedFg: 'black',
+      selectedBg: 'green',
+      interactive: true,
+      border: { type: 'line' },
+      columnSpacing: 2,
+      columnWidth: [28, 14, 8, 10, 12, 12],
+      style: { border: { fg: 'cyan' } },
+    })
+
+    table.setData({
+      headers: ['Model', 'Role', 'Runs', 'Success', 'Avg Cost', 'Avg Time'],
+      data: models.map((model) => [
+        model.model,
+        model.role,
+        String(model.runs),
+        `${(model.successRate * 100).toFixed(0)}%`,
+        formatCost(model.avgCost),
+        formatDuration(model.avgDurationMs),
+      ]),
+    })
+  }
+
   private renderHeader(): void {
     this.grid.set(0, 0, 3, 12, blessed.box, {
       label: ' BETTER CODE SOUL ',
@@ -337,7 +398,7 @@ export class Dashboard {
       left: 0,
       width: '100%',
       height: 1,
-      content: ' {bold}[1]{/bold} GENEL  {bold}[2]{/bold} MODELLER  {bold}[3]{/bold} AGENTLAR  {bold}[4]{/bold} ARACLAR  {bold}[5]{/bold} OPTIMIZE  {gray-fg}[ESC] Kapat{/gray-fg}',
+      content: ' {bold}[1]{/bold} GENEL  {bold}[2]{/bold} MODELLER  {bold}[3]{/bold} AGENTLAR  {bold}[4]{/bold} ARACLAR  {bold}[5]{/bold} OPTIMIZE  {bold}[6]{/bold} QUALITY  {gray-fg}[ESC] Kapat{/gray-fg}',
       tags: true,
       style: { bg: 'blue', fg: 'white' },
     })

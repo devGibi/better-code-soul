@@ -6,6 +6,9 @@ import { ResultMerger, type MergedResult } from './ResultMerger.js'
 import { CostGuard } from './CostGuard.js'
 import { ModelRouter } from '../services/ModelRouter.js'
 import { modelRegistry } from '../services/ModelRegistry.js'
+import { costCalculator } from '../services/CostCalculator.js'
+import { qualityLoopService, type QualityLoopResult } from '../services/QualityLoopService.js'
+import { checkpointService, type CheckpointResult } from '../services/CheckpointService.js'
 import { db } from '../services/Database.js'
 import { authReader } from '../services/AuthReader.js'
 import { logger } from '../utils/logger.js'
@@ -14,6 +17,7 @@ export interface OrchestrationResult extends MergedResult {
   cancelled?: boolean
   reason?: string
   decision?: DecomposeDecision
+  quality?: QualityLoopResult
 }
 
 export interface OrchestrationOptions {
@@ -119,6 +123,7 @@ export class Orchestrator {
     })
 
     const allResults: AgentResult[] = []
+    const checkpoint = await this.createCheckpoint(projectPath, orchId)
 
     let planResult: AgentResult | null = null
     if (decision.plannerModel && plan.plannerTask) {
@@ -251,23 +256,162 @@ export class Orchestrator {
       allResults.push(...allReviewResults)
     }
 
-    const merged = await this.resultMerger.merge({
+    let merged = await this.resultMerger.merge({
       planResult: planResult || { agentId: 'plan_skip', output: '', inputTokens: 0, outputTokens: 0, model: '', durationMs: 0, success: true },
       coderResults,
       reviewResults,
     })
+
+    let retryCount = 0
+    let finalCost = this.calculateTotalCost(allResults)
+    let quality = await qualityLoopService.run({
+      projectPath,
+      merged,
+      allResults,
+      totalCost: finalCost,
+      retryCount,
+      checkpoint,
+    })
+
+    if (quality.shouldRetry) {
+      retryCount = 1
+      const retryResult = await this.runRepairRetry({
+        projectPath,
+        orchId,
+        userRequest,
+        merged,
+        quality,
+        stepIndex: allResults.length + 1,
+        connectedModelIds,
+      })
+      allResults.push(retryResult)
+      if (retryResult.success) {
+        coderResults.push(retryResult)
+      }
+
+      merged = await this.resultMerger.merge({
+        planResult: planResult || { agentId: 'plan_skip', output: '', inputTokens: 0, outputTokens: 0, model: '', durationMs: 0, success: true },
+        coderResults,
+        reviewResults,
+      })
+      finalCost = this.calculateTotalCost(allResults)
+      quality = await qualityLoopService.run({
+        projectPath,
+        merged,
+        allResults,
+        totalCost: finalCost,
+        retryCount,
+        checkpoint,
+      })
+    }
+
     const durationMs = Date.now() - startTime
+    const finalTokens = allResults.reduce((sum, r) => sum + r.inputTokens + r.outputTokens, 0)
+    finalCost = this.calculateTotalCost(allResults)
 
     db.updateOrchestration(orchId, {
-      agentCount: merged.agentCount,
-      totalTokens: merged.totalTokens,
-      totalCost: merged.totalCost,
+      agentCount: allResults.length,
+      totalTokens: finalTokens,
+      totalCost: finalCost,
       durationMs,
-      modelsUsed: merged.modelsUsed,
+      modelsUsed: [...new Set(allResults.map((r) => r.model).filter(Boolean))],
       cancelled: false,
     })
 
-    return { ...merged, durationMs, decision }
+    db.saveQualityRun({
+      orchestrationId: orchId,
+      successScore: quality.score,
+      passed: quality.passed,
+      successfulTasks: quality.successfulTasks,
+      failedTasks: quality.failedTasks,
+      retryCount: quality.retryCount,
+      rollbackRecommended: quality.rollbackRecommended,
+      checkpointId: quality.checkpoint?.id,
+      totalCost: finalCost,
+      costPerSuccessfulTask: quality.costPerSuccessfulTask,
+      diffSummary: quality.diffSummary,
+      summary: quality.summary,
+      commands: quality.commands,
+    })
+
+    return { ...merged, totalTokens: finalTokens, totalCost: finalCost, agentCount: allResults.length, durationMs, decision, quality }
+  }
+
+  private async createCheckpoint(projectPath: string, orchId: number): Promise<CheckpointResult | undefined> {
+    const checkpoint = await checkpointService.create(projectPath, 'before orchestration')
+    db.saveQualityCheckpoint({
+      id: checkpoint.id,
+      orchestrationId: orchId,
+      label: checkpoint.label,
+      strategy: checkpoint.strategy,
+      patchPath: checkpoint.patchPath,
+      status: checkpoint.status,
+      safeToRollback: checkpoint.safeToRollback,
+      error: checkpoint.error,
+      createdAt: checkpoint.createdAt,
+    })
+    return checkpoint
+  }
+
+  private async runRepairRetry(params: {
+    projectPath: string
+    orchId: number
+    userRequest: string
+    merged: MergedResult
+    quality: QualityLoopResult
+    stepIndex: number
+    connectedModelIds: string[]
+  }): Promise<AgentResult> {
+    const routeResult = this.modelRouter.routeAndLog('code', params.connectedModelIds)
+    const result = await this.agentRunner.run({
+      agentType: 'coder',
+      model: routeResult.model,
+      task: this.buildRetryTask(params.userRequest, params.quality),
+      context: params.merged.output,
+      maxTokens: 2500,
+    })
+
+    db.saveOrchestrationStep({
+      orchestrationId: params.orchId,
+      stepIndex: params.stepIndex,
+      role: 'retry_1',
+      model: routeResult.model.id,
+      task: 'Quality repair retry',
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+      cost: this.calculateResultCost(result),
+      durationMs: result.durationMs,
+      success: result.success,
+      error: result.error,
+    })
+
+    return result
+  }
+
+  private buildRetryTask(userRequest: string, quality: QualityLoopResult): string {
+    const failedCommands = quality.commands
+      .filter((command) => !command.success)
+      .map((command) => `${command.display}\n${command.stderr || command.stdout || 'no output'}`)
+      .join('\n\n')
+
+    return [
+      `Orijinal gorev: ${userRequest}`,
+      '',
+      'Quality loop basarisiz oldu. Sadece basarisiz kalite kontrollerini duzelten minimal unified diff uret.',
+      'Yeni kapsam ekleme, mevcut diffleri genisletme. Test/lint/build hatasina odaklan.',
+      '',
+      `Quality score: ${quality.score}/100`,
+      failedCommands ? `Basarisiz komutlar:\n${failedCommands}` : 'Basarisiz komut yok; agent veya review basarisizligini duzelt.',
+    ].join('\n')
+  }
+
+  private calculateTotalCost(results: AgentResult[]): number {
+    return results.reduce((sum, result) => sum + this.calculateResultCost(result), 0)
+  }
+
+  private calculateResultCost(result: AgentResult): number {
+    const model = modelRegistry.getById(result.model) || modelRegistry.getBestFor('code')
+    return costCalculator.calculate({ input: result.inputTokens, output: result.outputTokens }, model)
   }
 
   private buildContextSummary(decision: DecomposeDecision, projectPath: string): string {

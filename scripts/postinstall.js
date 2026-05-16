@@ -45,6 +45,10 @@ const BCS_COMMANDS = {
     description: 'Better Code Soul kurulum ve saglik kontrolu',
     template: 'Call the bcs_doctor tool and return only its output.',
   },
+  'bcs-quality': {
+    description: 'Better Code Soul kalite ve basari raporu',
+    template: 'Call the bcs_quality tool with period set to "$ARGUMENTS" if provided, otherwise "month". Return only its output.',
+  },
   'bcs-agent': {
     description: 'Gorevi paralel subagentlara dagit',
     template: 'Call the bcs_agent tool with request set to "$ARGUMENTS". Return only its output.',

@@ -7,7 +7,7 @@ import { graphifyService } from '../services/GraphifyService.js'
 import { contextModeService } from '../services/ContextModeService.js'
 import { doctorService } from '../services/DoctorService.js'
 import { Orchestrator } from '../subagents/Orchestrator.js'
-import { formatTokens, formatCost } from '../utils/format.js'
+import { formatTokens, formatCost, formatDuration } from '../utils/format.js'
 import { logger } from '../utils/logger.js'
 
 interface JsonRpcRequest {
@@ -123,6 +123,29 @@ const TOOLS: Record<string, { description: string; inputSchema: unknown; handler
       return doctorService.formatMarkdown(report)
     },
   },
+  bcs_quality: {
+    description: 'Quality loop report — success score, model performance, cost per successful task',
+    inputSchema: { type: 'object', properties: { period: { type: 'string', enum: ['week', 'month'] } } },
+    handler: async (args) => {
+      const days = args.period === 'week' ? 7 : 30
+      const summary = db.getQualitySummary(days)
+      const models = db.getModelPerformanceHistory(days).slice(0, 8)
+      const lines = [
+        `Quality runs: ${summary.totalRuns}`,
+        `Avg score: ${summary.avgSuccessScore.toFixed(1)}/100`,
+        `Success rate: ${(summary.successRate * 100).toFixed(0)}%`,
+        `Cost/successful task: ${formatCost(summary.avgCostPerSuccessfulTask)}`,
+        `Retry rate: ${(summary.retryRate * 100).toFixed(0)}%`,
+      ]
+      if (models.length > 0) {
+        lines.push('', 'Model performance:')
+        for (const model of models) {
+          lines.push(`${model.model}/${model.role}: ${model.runs} runs, ${(model.successRate * 100).toFixed(0)}%, ${formatCost(model.avgCost)}, ${formatDuration(model.avgDurationMs)}`)
+        }
+      }
+      return lines.join('\n')
+    },
+  },
   bcs_agent: {
     description: 'Dispatch task to parallel subagent orchestration',
     inputSchema: {
@@ -151,6 +174,7 @@ const TOOLS: Record<string, { description: string; inputSchema: unknown; handler
         `Agents: ${result.agentCount}`,
         `Tokens: ${result.totalTokens.toLocaleString()}`,
         `Cost: ${formatCost(result.totalCost)}`,
+        result.quality ? `Quality: ${result.quality.score}/100 (${result.quality.passed ? 'PASS' : 'FAIL'}), cost/successful task ${formatCost(result.quality.costPerSuccessfulTask)}` : '',
         `Duration: ${(result.durationMs / 1000).toFixed(0)}s`,
         '',
         result.output,

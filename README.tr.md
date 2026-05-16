@@ -24,20 +24,22 @@ better-code-soul setup
 | `/bcs-context-mode` | Context Mode token tasarrufu yonetimi |
 | `/bcs-optimize` | Token optimizasyon onerileri |
 | `/bcs-doctor` | Kurulum, auth, depolama ve arac saglik kontrolu |
+| `/bcs-quality` | Kalite raporu — basari skoru, model performansi, basarili task maliyeti |
 
 ## Dashboard
 
 `/bcs` komutu lokal bir dashboard server baslatir ve tarayicida acar.
-Terminal UI icin planlanan 5 panelli tasarim aynen korunur:
+Terminal UI icin planlanan 6 panelli tasarim aynen korunur:
 
 1. **GENEL** — 7 gunluk token kullanim grafigi, context dolumu, arac durumu
 2. **MODELLER** — Model tablosu (tier, fiyat, baglanti durumu)
 3. **AGENTLAR** | Son orkestrasyon sonucu ve agent adimlari
 4. **ARACLAR** | Graphify ve Context Mode durumu ile toggle kontrolleri
 5. **OPTIMIZE** | Kullanim verilerine dayali optimizasyon onerileri
+6. **QUALITY** | Basari skoru, model performans gecmisi, retry/cakisma oranlari, cost per successful task
 
 Dashboard kontrolleri:
-- `[1]-[5]` — Sekme degistir
+- `[1]-[6]` — Sekme degistir
 - `[G]` — Araclar sekmesinde Graphify toggle
 - `[C]` — Araclar sekmesinde Context Mode toggle
 - `[B]` — Araclar sekmesinde graf build/guncelle
@@ -72,6 +74,25 @@ Better Code Soul yaklasimi (hizli):
   → Sure: 4 dk (paralel) · Maliyet: $0.06
 
 Tasarruf: %87 maliyet, %73 sure
+```
+
+## Quality Loop
+
+Faz 2, ucuz isin ayni zamanda basarili oldugunu kanitlar. `/bcs-agent` bittikten sonra Better Code Soul artik:
+
+- `package.json` uzerinden kalite komutlarini algilar (`test:run` veya `test`, `lint`, `build`)
+- Algilanan komutlari calistirir; pass/fail, sure ve komut cikti ozetlerini kaydeder
+- Komut sonuclari, agent basarisi, review bulgulari, cakismalar ve retry sayisindan task success score hesaplar
+- Role/model bazli performans gecmisi tutar: basari orani, ortalama maliyet, sure ve token
+- Diff ozeti uretir: dokunulan dosyalar, hunk sayisi, ekleme/silme ve cakismalar
+- Orkestrasyon oncesi git diff checkpoint olusturur ve manuel rollback guvenli mi isaretler
+- Basarisiz islerin maliyetini de dahil ederek `cost per successful task` raporlar
+
+Kullanim:
+
+```bash
+/bcs-quality month
+better-code-soul quality
 ```
 
 ## Model Router
@@ -122,6 +143,7 @@ Bu tum araclari Model Context Protocol (stdio transport) uzerinden sunar.
 better-code-soul setup     # Plugin ve komutlari OpenCode'a kaydet
 better-code-soul status    # Kurulum durumunu kontrol et
 better-code-soul doctor    # Kurulum/auth/arac saglik kontrolu
+better-code-soul quality   # Quality loop raporu
 better-code-soul dashboard # Lokal web dashboard'u baslat
 better-code-soul mcp       # MCP server baslat (stdio)
 better-code-soul help      # Yardim goster

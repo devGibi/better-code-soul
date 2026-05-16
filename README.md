@@ -24,20 +24,22 @@ better-code-soul setup
 | `/bcs-context-mode` | Context Mode token savings management |
 | `/bcs-optimize` | Token optimization suggestions |
 | `/bcs-doctor` | Install, auth, storage, and tool diagnostics |
+| `/bcs-quality` | Quality loop report — success score, model performance, cost per successful task |
 
 ## Dashboard
 
 The `/bcs` command starts a local dashboard server and opens it in your browser.
-It keeps the same 5-panel design that was planned for the terminal UI:
+It keeps the same 6-panel design that was planned for the terminal UI:
 
 1. **GENEL** — 7-day token usage chart, context fill gauge, tool status
 2. **MODELLER** — Model table with tier, price, and connection status
 3. **AGENTLAR** — Last orchestration result with agent steps
 4. **ARACLAR** — Graphify and Context Mode status with toggle controls
 5. **OPTIMIZE** — Optimization suggestions based on usage data
+6. **QUALITY** — Success score, model performance history, retry/conflict rates, cost per successful task
 
 Dashboard controls:
-- `[1]-[5]` — Switch tabs
+- `[1]-[6]` — Switch tabs
 - `[G]` — Toggle Graphify on the Tools tab
 - `[C]` — Toggle Context Mode on the Tools tab
 - `[B]` — Build/Update Graphify graph on the Tools tab
@@ -72,6 +74,25 @@ Better Code Soul approach (fast):
   → Time: 4 min (parallel) · Cost: $0.06
 
 Savings: 87% cost, 73% time
+```
+
+## Quality Loop
+
+Phase 2 measures whether cheap work is also successful. After `/bcs-agent` finishes, Better Code Soul now:
+
+- Detects project quality commands from `package.json` (`test:run` or `test`, `lint`, `build`)
+- Runs the detected commands and records pass/fail, duration, and command output tails
+- Calculates a task success score from command results, agent success, review issues, conflicts, and retry count
+- Records model performance history by role/model: success rate, average cost, duration, and tokens
+- Produces a diff summary: touched files, hunks, additions/deletions, and conflicts
+- Creates a git diff checkpoint before orchestration and marks whether manual rollback is safe
+- Reports `cost per successful task`, including failed work in the cost side of the metric
+
+Use:
+
+```bash
+/bcs-quality month
+better-code-soul quality
 ```
 
 ## Model Router
@@ -122,6 +143,7 @@ This exposes all tools via the Model Context Protocol (stdio transport).
 better-code-soul setup     # Register plugin and commands with OpenCode
 better-code-soul status    # Check installation status
 better-code-soul doctor    # Run install/auth/tool diagnostics
+better-code-soul quality   # Show quality loop report
 better-code-soul dashboard # Start local web dashboard
 better-code-soul mcp       # Start MCP server (stdio)
 better-code-soul help      # Show help

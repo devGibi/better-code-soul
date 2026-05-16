@@ -108,6 +108,11 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     return
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/quality') {
+    sendJson(res, 200, getQualityData())
+    return
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/tools') {
     sendJson(res, 200, await getToolsData())
     return
@@ -251,7 +256,49 @@ function getAgentsData() {
         costLabel: formatCost(step.cost || 0),
         durationLabel: formatDuration(step.duration_ms || 0),
       })),
+      quality: row.quality ? formatQualityRun(row.quality) : null,
     },
+  }
+}
+
+function getQualityData() {
+  const summary = db.getQualitySummary(30)
+  const modelPerformance = db.getModelPerformanceHistory(30).map((model) => ({
+    ...model,
+    successRateLabel: `${Math.round(model.successRate * 100)}%`,
+    avgCostLabel: formatCost(model.avgCost),
+    avgDurationLabel: formatDuration(model.avgDurationMs),
+    avgTokensLabel: formatTokens(Math.round(model.avgTokens)),
+  }))
+  const recentRuns = db.getRecentQualityRuns(10).map(formatQualityRun)
+  const lastRun = db.getLastQualityRun()
+
+  return {
+    summary: {
+      ...summary,
+      avgSuccessScoreLabel: `${summary.avgSuccessScore.toFixed(1)}/100`,
+      successRateLabel: `${Math.round(summary.successRate * 100)}%`,
+      avgCostPerSuccessfulTaskLabel: formatCost(summary.avgCostPerSuccessfulTask),
+      retryRateLabel: `${Math.round(summary.retryRate * 100)}%`,
+      conflictRateLabel: `${Math.round(summary.conflictRate * 100)}%`,
+    },
+    modelPerformance,
+    recentRuns,
+    lastRun: lastRun ? formatQualityRun(lastRun) : null,
+  }
+}
+
+function formatQualityRun(run: any) {
+  const diff = run.diff_summary || {}
+  return {
+    ...run,
+    passed: Boolean(run.passed),
+    successScoreLabel: `${Number(run.success_score || 0).toFixed(0)}/100`,
+    totalCostLabel: formatCost(run.total_cost_usd || 0),
+    costPerSuccessfulTaskLabel: formatCost(run.cost_per_successful_task || 0),
+    timestampLabel: new Date(run.created_at || run.timestamp || Date.now()).toLocaleString('tr-TR'),
+    diffSummaryLabel: `${diff.filesTouched || 0} files · ${diff.totalHunks || 0} hunks · +${diff.totalAdditions || 0}/-${diff.totalDeletions || 0}`,
+    conflictCount: diff.conflictCount || 0,
   }
 }
 
@@ -450,6 +497,7 @@ function renderDashboardHtml(): string {
         <button class="tab" data-tab="agents">[3] AGENTLAR</button>
         <button class="tab" data-tab="tools">[4] ARACLAR</button>
         <button class="tab" data-tab="optimize">[5] OPTIMIZE</button>
+        <button class="tab" data-tab="quality">[6] QUALITY</button>
       </nav>
       <main id="app"></main>
       <footer>
@@ -459,7 +507,7 @@ function renderDashboardHtml(): string {
     </div>
   </div>
   <script>
-    const state = { tab: 'overview', overview: null, models: null, agents: null, tools: null, optimize: null, errors: [] };
+    const state = { tab: 'overview', overview: null, models: null, agents: null, tools: null, optimize: null, quality: null, errors: [] };
     const app = document.getElementById('app');
     const fmt = new Intl.NumberFormat('tr-TR');
 
@@ -476,9 +524,9 @@ function renderDashboardHtml(): string {
     }
 
     async function loadAll() {
-      const names = ['overview', 'models', 'agents', 'tools', 'optimize'];
+      const names = ['overview', 'models', 'agents', 'tools', 'optimize', 'quality'];
       const settled = await Promise.allSettled([
-        api('/api/overview'), api('/api/models'), api('/api/agents'), api('/api/tools'), api('/api/optimize')
+        api('/api/overview'), api('/api/models'), api('/api/agents'), api('/api/tools'), api('/api/optimize'), api('/api/quality')
       ]);
       const errors = [];
       settled.forEach((result, index) => {
@@ -524,6 +572,7 @@ function renderDashboardHtml(): string {
       if (state.tab === 'agents') renderAgents();
       if (state.tab === 'tools') renderTools();
       if (state.tab === 'optimize') renderOptimize();
+      if (state.tab === 'quality') renderQuality();
     }
 
     function renderOverview() {
@@ -564,7 +613,8 @@ function renderDashboardHtml(): string {
       const max = Math.max(...last.steps.map(step => step.duration_ms || 0), 1);
       const steps = last.steps.map(step => \`
         <div class="step"><strong>\${esc(step.role)}</strong><div><div class="track"><span style="width:\${Math.max(8, Math.round((step.duration_ms || 0) / max * 100))}%"></span></div><span class="muted">\${esc(step.model)} / \${esc(step.tokenLabel)} tok / \${esc(step.costLabel)} / \${esc(step.durationLabel)}\${step.error ? ' / ' + esc(step.error) : ''}</span></div><span class="badge \${step.success ? 'review' : 'catalog'}">\${step.success ? 'OK' : 'FAIL'}</span></div>\`).join('');
-      app.innerHTML = \`<div class="grid">\${renderErrors()}<section class="card full"><h2>Son Orkestrasyon - \${esc(last.timestampLabel)}</h2><p><strong>Gorev:</strong> \${esc(last.userRequest)}</p><div class="steps">\${steps}</div><p><strong>Toplam:</strong> \${esc(last.totalTokensLabel)} tok / \${esc(last.totalCostLabel)} / \${esc(last.durationLabel)}</p></section></div>\`;
+      const quality = last.quality ? \`<section class="card full"><h2>Quality Loop</h2><p><strong>Score:</strong> \${esc(last.quality.successScoreLabel)} / \${last.quality.passed ? 'PASS' : 'FAIL'} · <strong>Cost/success:</strong> \${esc(last.quality.costPerSuccessfulTaskLabel)} · <strong>Retry:</strong> \${esc(last.quality.retry_count || 0)}</p><p class="muted">Diff: \${esc(last.quality.diffSummaryLabel)} · Conflicts: \${esc(last.quality.conflictCount || 0)}</p></section>\` : '';
+      app.innerHTML = \`<div class="grid">\${renderErrors()}<section class="card full"><h2>Son Orkestrasyon - \${esc(last.timestampLabel)}</h2><p><strong>Gorev:</strong> \${esc(last.userRequest)}</p><div class="steps">\${steps}</div><p><strong>Toplam:</strong> \${esc(last.totalTokensLabel)} tok / \${esc(last.totalCostLabel)} / \${esc(last.durationLabel)}</p></section>\${quality}</div>\`;
     }
 
     function renderTools(log = '') {
@@ -582,6 +632,26 @@ function renderDashboardHtml(): string {
       const suggestions = state.optimize.suggestions;
       const body = suggestions.length ? suggestions.map(item => \`<section class="card full"><h2>\${esc(item.id)}</h2><p>\${esc(item.message)}</p></section>\`).join('') : '<section class="card full"><h2>Optimizasyon</h2><div class="empty">Her sey optimize gorunuyor.</div></section>';
       app.innerHTML = \`<div class="grid">\${renderErrors()}\${body}</div>\`;
+    }
+
+    function renderQuality() {
+      const quality = state.quality;
+      const summary = quality.summary;
+      const modelRows = quality.modelPerformance.length ? quality.modelPerformance.map(model => \`
+        <tr><td><strong>\${esc(model.model)}</strong><br><span class="muted">\${esc(model.role)}</span></td><td>\${esc(model.runs)}</td><td>\${esc(model.successRateLabel)}</td><td>\${esc(model.avgCostLabel)}</td><td>\${esc(model.avgDurationLabel)}</td><td>\${esc(model.avgTokensLabel)}</td></tr>
+      \`).join('') : '<tr><td colspan="6" class="muted">Model performance history yok.</td></tr>';
+      const recent = quality.recentRuns.length ? quality.recentRuns.map(run => \`
+        <div class="step"><strong>#\${esc(run.orchestration_id)}</strong><div><div class="track"><span style="width:\${Math.max(5, Math.min(100, Number(run.success_score || 0)))}%"></span></div><span class="muted">\${esc(run.timestampLabel)} / \${esc(run.costPerSuccessfulTaskLabel)} success cost / \${esc(run.diffSummaryLabel)}</span></div><span class="badge \${run.passed ? 'review' : 'catalog'}">\${esc(run.successScoreLabel)}</span></div>
+      \`).join('') : '<div class="empty">Henuz quality run yok. /bcs-agent calistir.</div>';
+      app.innerHTML = \`
+        <div class="grid">
+          \${renderErrors()}
+          <section class="card third"><h2>Success Score</h2><strong style="font-size:34px">\${esc(summary.avgSuccessScoreLabel)}</strong><p class="muted">\${esc(summary.successRateLabel)} pass rate / \${esc(summary.totalRuns)} run</p></section>
+          <section class="card third"><h2>Cost / Success</h2><strong style="font-size:34px">\${esc(summary.avgCostPerSuccessfulTaskLabel)}</strong><p class="muted">Basarisiz task maliyeti dahil</p></section>
+          <section class="card third"><h2>Risk</h2><p>Retry: \${esc(summary.retryRateLabel)}</p><p>Conflict: \${esc(summary.conflictRateLabel)}</p></section>
+          <section class="card full"><h2>Model Performance</h2><table><thead><tr><th>Model</th><th>Runs</th><th>Success</th><th>Avg Cost</th><th>Avg Duration</th><th>Avg Tokens</th></tr></thead><tbody>\${modelRows}</tbody></table></section>
+          <section class="card full"><h2>Recent Quality Runs</h2><div class="steps">\${recent}</div></section>
+        </div>\`;
     }
 
     function renderErrors() {
@@ -611,8 +681,8 @@ function renderDashboardHtml(): string {
       render();
     });
     window.addEventListener('keydown', event => {
-      const tabs = ['overview', 'models', 'agents', 'tools', 'optimize'];
-      if (/^[1-5]$/.test(event.key)) document.querySelector(\`[data-tab="\${tabs[Number(event.key) - 1]}"]\`).click();
+      const tabs = ['overview', 'models', 'agents', 'tools', 'optimize', 'quality'];
+      if (/^[1-6]$/.test(event.key)) document.querySelector(\`[data-tab="\${tabs[Number(event.key) - 1]}"]\`).click();
       if ((event.key === 'g' || event.key === 'G') && state.tab === 'tools') toggleGraphify();
       if ((event.key === 'c' || event.key === 'C') && state.tab === 'tools') toggleContextMode();
       if ((event.key === 'b' || event.key === 'B') && state.tab === 'tools') buildGraphify();

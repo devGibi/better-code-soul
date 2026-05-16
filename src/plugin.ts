@@ -368,6 +368,54 @@ export const BetterCodeSoulPlugin = async (_app?: unknown): Promise<PluginDefini
         },
       },
 
+      bcs_quality: {
+        description: 'Quality loop report — success score, model performance, cost per successful task',
+        parameters: {
+          period: {
+            type: 'string',
+            description: 'Report period: week or month',
+            enum: ['week', 'month'],
+          },
+        },
+        execute: async ({ period = 'month' }) => {
+          const days = period === 'week' ? 7 : 30
+          const summary = db.getQualitySummary(days)
+          const models = db.getModelPerformanceHistory(days).slice(0, 12)
+          const recent = db.getRecentQualityRuns(5)
+
+          let output = `## Quality Loop — ${period === 'week' ? 'This Week' : 'Last 30 Days'}\n\n`
+          output += `| Metric | Value |\n|---|---:|\n`
+          output += `| Runs | ${summary.totalRuns} |\n`
+          output += `| Success score avg | ${summary.avgSuccessScore.toFixed(1)}/100 |\n`
+          output += `| Success rate | ${(summary.successRate * 100).toFixed(0)}% |\n`
+          output += `| Cost / successful task | ${formatCost(summary.avgCostPerSuccessfulTask)} |\n`
+          output += `| Retry rate | ${(summary.retryRate * 100).toFixed(0)}% |\n`
+          output += `| Conflict rate | ${(summary.conflictRate * 100).toFixed(0)}% |\n\n`
+
+          output += `### Model Performance\n`
+          if (models.length === 0) {
+            output += `_No model performance history yet._\n\n`
+          } else {
+            output += `| Model | Role | Runs | Success | Avg Cost | Avg Duration |\n|---|---|---:|---:|---:|---:|\n`
+            for (const model of models) {
+              output += `| ${model.model} | ${model.role} | ${model.runs} | ${(model.successRate * 100).toFixed(0)}% | ${formatCost(model.avgCost)} | ${formatDuration(model.avgDurationMs)} |\n`
+            }
+            output += `\n`
+          }
+
+          output += `### Recent Runs\n`
+          if (recent.length === 0) {
+            output += `_No quality runs yet. Run /bcs-agent to create one._`
+          } else {
+            for (const run of recent) {
+              output += `- #${run.orchestration_id}: ${run.success_score}/100 · ${run.passed ? 'PASS' : 'FAIL'} · ${formatCost(run.cost_per_successful_task || 0)}/successful task · retries ${run.retry_count || 0}\n`
+            }
+          }
+
+          return output
+        },
+      },
+
       bcs_agent: {
         description: 'Gorevi paralel subagentlara dagit. Buyuk feature veya refactor icin kullan.',
         parameters: {
@@ -414,14 +462,26 @@ export const BetterCodeSoulPlugin = async (_app?: unknown): Promise<PluginDefini
           output += `| Paralel agent | ${result.agentCount} |\n`
           output += `| Toplam token | ${result.totalTokens.toLocaleString()} |\n`
           output += `| Maliyet | ${formatCost(result.totalCost)} |\n`
-          output += `| Sure | ${Math.round(result.durationMs / 1000)} saniye |\n\n`
+          output += `| Sure | ${Math.round(result.durationMs / 1000)} saniye |\n`
+
+          if (result.quality) {
+            output += `| Quality score | ${result.quality.score}/100 (${result.quality.passed ? 'PASS' : 'FAIL'}) |\n`
+            output += `| Cost / successful task | ${formatCost(result.quality.costPerSuccessfulTask)} |\n`
+            output += `| Retry | ${result.quality.retryCount} |\n`
+          }
+
+          output += `\n`
 
           if (result.hasConflicts) {
             output += `**Dosya cakismalari var — asagiyi incele**\n\n`
           }
 
+          if (result.quality) {
+            output += `## Quality Loop\n\n${result.quality.summary}\n\n`
+          }
+
           output += result.output
-          output += `\n\n---\n_Detaylar icin: \`/bcs\` → Sekme 3 (AGENTLAR)_`
+          output += `\n\n---\n_Detaylar icin: \`/bcs\` → Sekme 3 (AGENTLAR) ve Sekme 6 (QUALITY)_`
 
           return output
         },

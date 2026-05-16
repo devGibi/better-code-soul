@@ -41,6 +41,10 @@ const BCS_COMMANDS: Record<string, { description: string; template: string }> = 
     description: 'Better Code Soul kurulum ve saglik kontrolu',
     template: 'Call the bcs_doctor tool and return only its output.',
   },
+  'bcs-quality': {
+    description: 'Better Code Soul kalite ve basari raporu',
+    template: 'Call the bcs_quality tool with period set to "$ARGUMENTS" if provided, otherwise "month". Return only its output.',
+  },
   'bcs-agent': {
     description: 'Gorevi paralel subagentlara dagit',
     template: 'Call the bcs_agent tool with request set to "$ARGUMENTS". Return only its output.',
@@ -203,6 +207,34 @@ async function doctor(): Promise<void> {
   db.close()
 }
 
+async function quality(): Promise<void> {
+  const { db } = await import('./services/Database.js')
+  const { modelRegistry } = await import('./services/ModelRegistry.js')
+  const { formatCost, formatDuration } = await import('./utils/format.js')
+
+  await db.init()
+  modelRegistry.init()
+
+  const days = args.includes('--week') ? 7 : 30
+  const summary = db.getQualitySummary(days)
+  const models = db.getModelPerformanceHistory(days).slice(0, 10)
+  console.log(`Quality Loop (${days} days)\n`)
+  console.log(`  Runs: ${summary.totalRuns}`)
+  console.log(`  Avg success score: ${summary.avgSuccessScore.toFixed(1)}/100`)
+  console.log(`  Success rate: ${(summary.successRate * 100).toFixed(0)}%`)
+  console.log(`  Cost / successful task: ${formatCost(summary.avgCostPerSuccessfulTask)}`)
+  console.log(`  Retry rate: ${(summary.retryRate * 100).toFixed(0)}%`)
+  console.log(`  Conflict rate: ${(summary.conflictRate * 100).toFixed(0)}%`)
+
+  if (models.length > 0) {
+    console.log('\nModel performance:')
+    for (const model of models) {
+      console.log(`  ${model.model} / ${model.role}: ${model.runs} run, ${(model.successRate * 100).toFixed(0)}%, ${formatCost(model.avgCost)}, ${formatDuration(model.avgDurationMs)}`)
+    }
+  }
+  db.close()
+}
+
 function help(): void {
   console.log(`
 Better Code Soul — OpenCode plugin for token tracking and parallel subagent orchestration
@@ -211,6 +243,7 @@ Usage:
   better-code-soul setup     Register plugin with OpenCode
   better-code-soul status    Check installation status
   better-code-soul doctor    Run install/auth/tool diagnostics
+  better-code-soul quality   Show quality loop report
   better-code-soul dashboard Open web dashboard
   better-code-soul mcp       Start MCP server (stdio)
   better-code-soul help      Show this help
@@ -225,6 +258,7 @@ OpenCode Commands (after setup):
   /bcs-context-mode    Context Mode management
   /bcs-optimize        Optimization suggestions
   /bcs-doctor          Install/auth/tool diagnostics
+  /bcs-quality         Quality score and cost per successful task
 `)
 }
 
@@ -238,6 +272,12 @@ switch (command) {
   case 'doctor':
     doctor().catch((err) => {
       console.error(`Doctor failed: ${err}`)
+      process.exit(1)
+    })
+    break
+  case 'quality':
+    quality().catch((err) => {
+      console.error(`Quality report failed: ${err}`)
       process.exit(1)
     })
     break
